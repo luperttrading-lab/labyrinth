@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Labyrinth">
+<meta name="theme-color" content="#1b130c">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
+<title>Labyrinth</title>
+<style>
+  :root {
+    --bg: #1b130c; --panel: #2a1e14; --text: #f3e9dc; --muted: #b9a58e;
+    --accent: #e0a458; --ok: #5fbf6a; --danger: #d9534f;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overscroll-behavior: none; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+  body { display: flex; flex-direction: column;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  .screen { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .screen[hidden] { display: none; }
+  h1 { font-size: 28px; margin: 18px 16px 4px; letter-spacing: .5px; }
+  h2 { font-size: 15px; margin: 18px 16px 8px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .8px; }
+  p.sub { margin: 0 16px; color: var(--muted); }
+  .list { display: flex; flex-direction: column; gap: 8px; padding: 0 16px; }
+  .card { background: var(--panel); border-radius: 14px; padding: 12px 14px; border: 1px solid #3a2a1c;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .card.pick { cursor: pointer; }
+  .card.pick.sel { border-color: var(--accent); }
+  .card.off { opacity: .45; }
+  .card small { color: var(--muted); display: block; }
+  .levels { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; padding: 0 16px; }
+  .lvl { background: var(--panel); border: 1px solid #3a2a1c; border-radius: 12px; padding: 10px; text-align: center; color: var(--text); font: inherit; }
+  .lvl b { display: block; font-size: 20px; }
+  .lvl small { color: var(--muted); }
+  .lvl:disabled { opacity: .35; }
+  .btn { background: var(--accent); color: #231507; border: 0; border-radius: 12px; padding: 12px 16px; font: inherit; font-weight: 700; }
+  .btn.ghost { background: transparent; color: var(--text); border: 1px solid #5a4430; font-weight: 600; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .settings { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
+  .settings label { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .settings input[type=range] { flex: 1; max-width: 55%; accent-color: var(--accent); }
+  .foot { margin-top: auto; padding: 16px; text-align: center; color: var(--muted); font-size: 13px; }
+  #version { text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
+
+  #game { position: relative; }
+  .hud { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; gap: 8px; }
+  .hud .stat { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .hud .btn { padding: 8px 12px; font-size: 14px; }
+  #stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(12, 8, 4, .72); z-index: 10; padding: 16px; }
+  .overlay[hidden] { display: none; }
+  .box { background: var(--panel); border-radius: 18px; padding: 20px; max-width: 340px; width: 100%; text-align: center; border: 1px solid #3a2a1c; }
+  .box h3 { margin: 0 0 6px; font-size: 22px; }
+  .box p { margin: 6px 0 14px; color: var(--muted); }
+  .box .row { justify-content: center; flex-wrap: wrap; }
+
+  /* Update-Banner: fixed, direkt im body, überlagert statt zu schieben */
+  .update {
+    position: fixed; left: 12px; right: 12px; top: max(env(safe-area-inset-top), 12px); z-index: 30;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    background: #34c759; color: #06240e;
+    padding: 12px 14px; border-radius: 14px; font-weight: 600; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+    opacity: 0; transition: opacity .35s ease; pointer-events: none;
+  }
+  .update.an { opacity: 1; pointer-events: auto; }
+  .update[hidden] { display: none; }
+  .update.info { background: #2d2d33; color: #f2f2f7; font-weight: 500; }
+  .update.unten { top: auto; bottom: max(env(safe-area-inset-bottom), 12px); }
+  .update .btn { width: auto; padding: 8px 14px; font-size: 15px; background: #06240e; color: #fff; }
+</style>
+</head>
+<body>
+
+<!-- ========== Menü ========== -->
+<section class="screen" id="menu">
+  <h1>Labyrinth</h1>
+  <p class="sub">Handy flach halten, Kugel durch Kippen ins Ziel balancieren.</p>
+
+  <h2>Spielart</h2>
+  <div class="list" id="modes"></div>
+
+  <h2>Level</h2>
+  <div class="levels" id="levels"></div>
+
+  <h2>Einstellungen</h2>
+  <div class="settings">
+    <label>Empfindlichkeit <input type="range" id="sens" min="0.4" max="2" step="0.1"></label>
+    <label>Rollwiderstand <input type="range" id="fric" min="0.2" max="3" step="0.1"></label>
+  </div>
+
+  <div class="foot">Labyrinth · <span id="version"></span></div>
+</section>
+
+<!-- ========== Spiel ========== -->
+<section class="screen" id="game" hidden>
+  <div class="hud">
+    <button class="btn ghost" id="back">‹ Menü</button>
+    <span class="stat" id="hudLevel"></span>
+    <span class="stat" id="hudTime">0,0 s</span>
+    <span class="stat" id="hudFalls">⚫ 0</span>
+    <button class="btn ghost" id="calib" title="Aktuelle Haltung als waagerecht setzen">⊙ Null</button>
+  </div>
+  <div id="stage"><canvas id="cv"></canvas></div>
+
+  <div class="overlay" id="ovStart" hidden>
+    <div class="box">
+      <h3 id="startTitle">Level 1</h3>
+      <p id="startText">Leg das Handy flach hin oder halte es waagerecht. Tipp auf Start – die aktuelle Haltung gilt dann als „waagerecht“.</p>
+      <div class="row"><button class="btn" id="startBtn">Start</button></div>
+      <p id="sensorNote" style="font-size:13px;margin-top:12px"></p>
+    </div>
+  </div>
+
+  <div class="overlay" id="ovWin" hidden>
+    <div class="box">
+      <h3>Ziel erreicht!</h3>
+      <p id="winText"></p>
+      <div class="row">
+        <button class="btn ghost" id="retryBtn">Nochmal</button>
+        <button class="btn" id="nextBtn">Nächstes Level</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="update" id="update" hidden>
+  <span id="update-text"></span>
+  <button class="btn" id="update-go">Jetzt laden</button>
+</div>
+
+<script>
+const APP_VERSION = '0.1';          // bei JEDER Änderung hochzählen
+
+/* ================================================================
+   Spielarten – bisher nur "classic" spielbar, der Rest ist geplant
+   ================================================================ */
+const MODES = [
+  { id: 'classic', name: 'Klassisch', desc: 'Löcher meiden, Kugel ins Ziel', ready: true },
+  { id: 'multi',   name: 'Mehrere Kugeln', desc: 'Alle Kugeln in ihre Mulden', ready: false },
+  { id: 'hold',    name: 'Ruhe halten', desc: 'Kugel X Sekunden im Zielfeld halten', ready: false },
+  { id: 'dark',    name: 'Dunkel', desc: 'Nur Umgebung der Kugel sichtbar', ready: false },
+];
+
+/* ================================================================
+   Level – 11 × 17 Felder
+   #  Wand   .  Boden   o  Loch   S  Start   Z  Ziel
+   ================================================================ */
+const LEVELS = [
+  { name: 'Aufwärmen', map: [
+    '###########',
+    '#S........#',
+    '#.........#',
+    '#######...#',
+    '#.........#',
+    '#..o......#',
+    '#...#######',
+    '#.........#',
+    '#......o..#',
+    '#######...#',
+    '#.........#',
+    '#..o......#',
+    '#...#######',
+    '#.........#',
+    '#.......o.#',
+    '#........Z#',
+    '###########' ] },
+  { name: 'Kammern', map: [
+    '###########',
+    '#S..#.....#',
+    '#...#..o..#',
+    '#.o.#.....#',
+    '#...#.#####',
+    '#.....#...#',
+    '####..#.o.#',
+    '#.....#...#',
+    '#.o####...#',
+    '#.........#',
+    '#######o..#',
+    '#.....#...#',
+    '#.o.......#',
+    '#...#######',
+    '#...o.....#',
+    '#o.......Z#',
+    '###########' ] },
+  { name: 'Slalom', map: [
+    '###########',
+    '#S........#',
+    '#..o...o..#',
+    '#o...o...o#',
+    '#..o...o..#',
+    '#o...o...o#',
+    '#..o...o..#',
+    '#.........#',
+    '#####.#####',
+    '#.........#',
+    '#.o.o.o.o.#',
+    '#.........#',
+    '#.o.o.o.o.#',
+    '#.........#',
+    '#.o.o.o.o.#',
+    '#....Z....#',
+    '###########' ] },
+  { name: 'Irrgarten', map: [
+    '###########',
+    '#S#.......#',
+    '#.#.#####.#',
+    '#.#.#...#.#',
+    '#.#.#.#.#.#',
+    '#...#.#...#',
+    '#####.#####',
+    '#.....#...#',
+    '#.#####.#.#',
+    '#.....#.#.#',
+    '#####.#.#.#',
+    '#.....#.#.#',
+    '#.#####.#.#',
+    '#.......#.#',
+    '#o#######.#',
+    '#........Z#',
+    '###########' ] },
+  { name: 'Stege', map: [
+    '###########',
+    '#S........#',
+    '#.........#',
+    '#oooo.oooo#',
+    '#.........#',
+    '#.........#',
+    '#.oooooooo#',
+    '#.........#',
+    '#.........#',
+    '#oooooooo.#',
+    '#.........#',
+    '#....o....#',
+    '#...ooo...#',
+    '#.........#',
+    '#oo.....oo#',
+    '#ooo.Z.ooo#',
+    '###########' ] },
+];
+
+/* ================================================================
+   Physik-Konstanten (Einheit: Feld = 1)
+   ================================================================ */
+const BALL_R = 0.30;      // Kugelradius
+const HOLE_R = 0.38;      // Lochradius – fällt, wenn Mittelpunkt drin
+const GOAL_R = 0.40;
+const BASE_ACC = 28;      // Felder/s² bei voller Neigung (sin = 1), vor Empfindlichkeit
+const RESTITUTION = 0.35; // Abprall an Wänden
+const MAX_SPEED = 14;     // Felder/s – verhindert Durchtunneln
+const SUBSTEPS = 4;
+
+/* ================================================================
+   Zustand & Speicher
+   ================================================================ */
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('laby.' + k); return v === null ? d : JSON.parse(v); } catch (_) { return d; } },
+  set(k, v) { try { localStorage.setItem('laby.' + k, JSON.stringify(v)); } catch (_) {} },
+};
+const settings = { sens: store.get('sens', 1), fric: store.get('fric', 1) };
+let mode = 'classic';
+let unlocked = store.get('unlocked', 1);
+let best = store.get('best', {});
+
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d');
+
+let level = null, levelIdx = 0;
+let ball = null;          // {x, y, vx, vy, falling, fallT, fallX, fallY}
+let running = false, finished = false;
+let tStart = 0, elapsed = 0, falls = 0;
+let cellPx = 30, dpr = 1;
+let boardCache = null;
+
+/* ================================================================
+   Neigung: DeviceOrientation (beta/gamma) → Schwerkraft in Bildschirm-Koordinaten
+   ================================================================ */
+const tilt = { gx: 0, gy: 0, rawB: 0, rawG: 0, zeroB: 0, zeroG: 0, have: false };
+const keys = new Set();
+
+function onOrientation(e) {
+  if (e.beta === null || e.gamma === null) return;
+  tilt.have = true;
+  tilt.rawB = e.beta; tilt.rawG = e.gamma;
+}
+function screenAngle() {
+  if (screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle;
+  return typeof window.orientation === 'number' ? (window.orientation + 360) % 360 : 0;
+}
+function calibrate() { tilt.zeroB = tilt.rawB; tilt.zeroG = tilt.rawG; }
+
+function readTilt() {
+  let dx = 0, dy = 0;
+  if (tilt.have) {
+    const rad = Math.PI / 180;
+    dx = Math.sin((tilt.rawG - tilt.zeroG) * rad);   // rechts runter → Kugel nach rechts
+    dy = Math.sin((tilt.rawB - tilt.zeroB) * rad);   // Oberkante hoch → Kugel nach unten
+    switch (screenAngle()) {                          // Gerätekoordinaten → Bildschirm
+      case 90:  [dx, dy] = [dy, -dx]; break;
+      case 180: [dx, dy] = [-dx, -dy]; break;
+      case 270: [dx, dy] = [-dy, dx]; break;
+    }
+  }
+  // Tastatur-Ersatz zum Testen am Rechner
+  if (keys.has('ArrowLeft') || keys.has('a')) dx -= 0.35;
+  if (keys.has('ArrowRight') || keys.has('d')) dx += 0.35;
+  if (keys.has('ArrowUp') || keys.has('w')) dy -= 0.35;
+  if (keys.has('ArrowDown') || keys.has('s')) dy += 0.35;
+  // leichte Glättung gegen Sensorrauschen
+  tilt.gx += (dx - tilt.gx) * 0.35;
+  tilt.gy += (dy - tilt.gy) * 0.35;
+}
+
+async function requestSensor() {
+  const DOE = window.DeviceOrientationEvent;
+  if (DOE && typeof DOE.requestPermission === 'function') {       // iOS ≥ 13
+    try {
+      const r = await DOE.requestPermission();
+      if (r !== 'granted') return 'denied';
+    } catch (_) { return 'denied'; }
+  }
+  if (!DOE) return 'none';
+  window.addEventListener('deviceorientation', onOrientation);
+  return 'ok';
+}
+let sensorState = null;
+
+/* ================================================================
+   Level laden
+   ================================================================ */
+function parseLevel(def) {
+  const rows = def.map.length, cols = def.map[0].length;
+  const wall = [], holes = [];
+  let start = null, goal = null;
+  for (let y = 0; y < rows; y++) {
+    wall.push([]);
+    for (let x = 0; x < cols; x++) {
+      const c = def.map[y][x];
+      wall[y].push(c === '#');
+      if (c === 'o') holes.push({ x: x + .5, y: y + .5 });
+      if (c === 'S') start = { x: x + .5, y: y + .5 };
+      if (c === 'Z') goal = { x: x + .5, y: y + .5 };
+    }
+  }
+  return { name: def.name, rows, cols, wall, holes, start, goal };
+}
+
+function resetBall() {
+  ball = { x: level.start.x, y: level.start.y, vx: 0, vy: 0, falling: false, fallT: 0 };
+}
+
+function loadLevel(i) {
+  levelIdx = i;
+  level = parseLevel(LEVELS[i]);
+  resetBall();
+  falls = 0; elapsed = 0; finished = false; running = false;
+  $('hudLevel').textContent = 'L' + (i + 1);
+  updateHud();
+  resize();
+}
+
+/* ================================================================
+   Physik
+   ================================================================ */
+function step(dt) {
+  if (ball.falling) {
+    ball.fallT += dt;
+    // Kugel wird ins Lochzentrum gezogen und schrumpft
+    ball.x += (ball.fallX - ball.x) * Math.min(1, dt * 12);
+    ball.y += (ball.fallY - ball.y) * Math.min(1, dt * 12);
+    if (ball.fallT > 0.55) {
+      if (ball.won) { win(); return; }
+      falls++; updateHud(); vibrate(60);
+      resetBall();
+    }
+    return;
+  }
+
+  readTilt();
+  const acc = BASE_ACC * settings.sens;
+  const h = dt / SUBSTEPS;
+  const damp = Math.exp(-0.9 * settings.fric * h);   // Rollwiderstand, exponentiell
+
+  for (let s = 0; s < SUBSTEPS; s++) {
+    ball.vx = (ball.vx + tilt.gx * acc * h) * damp;
+    ball.vy = (ball.vy + tilt.gy * acc * h) * damp;
+    const sp = Math.hypot(ball.vx, ball.vy);
+    if (sp > MAX_SPEED) { ball.vx *= MAX_SPEED / sp; ball.vy *= MAX_SPEED / sp; }
+    ball.x += ball.vx * h;
+    ball.y += ball.vy * h;
+    collideWalls();
+  }
+
+  // Ziel?
+  const g = level.goal;
+  if (Math.hypot(ball.x - g.x, ball.y - g.y) < GOAL_R) {
+    ball.falling = true; ball.won = true; ball.fallT = 0; ball.fallX = g.x; ball.fallY = g.y;
+    finished = true;
+    return;
+  }
+  // Loch?
+  for (const o of level.holes) {
+    const d = Math.hypot(ball.x - o.x, ball.y - o.y);
+    if (d < HOLE_R) {
+      ball.falling = true; ball.fallT = 0; ball.fallX = o.x; ball.fallY = o.y;
+      return;
+    }
+    // Lochrand: leichter Sog, wenn die Kugel schon über der Kante hängt
+    if (d < HOLE_R + BALL_R) {
+      const pull = 6 * (1 - (d - HOLE_R) / BALL_R) * dt;
+      ball.vx += (o.x - ball.x) / d * pull;
+      ball.vy += (o.y - ball.y) / d * pull;
+    }
+  }
+}
+
+let lastBump = 0;
+function collideWalls() {
+  const cx = Math.floor(ball.x), cy = Math.floor(ball.y);
+  for (let y = cy - 1; y <= cy + 1; y++) {
+    for (let x = cx - 1; x <= cx + 1; x++) {
+      if (y < 0 || x < 0 || y >= level.rows || x >= level.cols || !level.wall[y][x]) continue;
+      // nächster Punkt des Wandquadrats zur Kugelmitte
+      const px = Math.max(x, Math.min(ball.x, x + 1));
+      const py = Math.max(y, Math.min(ball.y, y + 1));
+      let nx = ball.x - px, ny = ball.y - py;
+      const d = Math.hypot(nx, ny);
+      if (d >= BALL_R) continue;
+      if (d < 1e-6) { nx = 0; ny = -1; } else { nx /= d; ny /= d; }
+      ball.x = px + nx * BALL_R;
+      ball.y = py + ny * BALL_R;
+      const vn = ball.vx * nx + ball.vy * ny;
+      if (vn < 0) {
+        ball.vx -= (1 + RESTITUTION) * vn * nx;
+        ball.vy -= (1 + RESTITUTION) * vn * ny;
+        if (-vn > 3 && performance.now() - lastBump > 120) { vibrate(Math.min(25, -vn * 2)); lastBump = performance.now(); }
+      }
+    }
+  }
+}
+
+function vibrate(ms) { try { navigator.vibrate && navigator.vibrate(ms); } catch (_) {} }
+
+/* ================================================================
+   Zeichnen
+   ================================================================ */
+function resize() {
+  if (!level) return;
+  const st = $('stage');
+  const W = st.clientWidth, H = st.clientHeight;
+  cellPx = Math.max(8, Math.floor(Math.min(W / level.cols, H / level.rows)));
+  dpr = Math.min(3, window.devicePixelRatio || 1);
+  cv.width = level.cols * cellPx * dpr; cv.height = level.rows * cellPx * dpr;
+  cv.style.width = level.cols * cellPx + 'px'; cv.style.height = level.rows * cellPx + 'px';
+  boardCache = null;
+  draw();
+}
+
+function renderBoard() {
+  const c = document.createElement('canvas');
+  c.width = cv.width; c.height = cv.height;
+  const g = c.getContext('2d');
+  const s = cellPx * dpr;
+  // Holzboden
+  const grd = g.createLinearGradient(0, 0, c.width, c.height);
+  grd.addColorStop(0, '#d9b27c'); grd.addColorStop(1, '#c39460');
+  g.fillStyle = grd; g.fillRect(0, 0, c.width, c.height);
+  g.globalAlpha = .08; g.strokeStyle = '#6b4520'; g.lineWidth = 1 * dpr;
+  for (let i = 0; i < c.height; i += 5 * dpr) {
+    g.beginPath(); g.moveTo(0, i + Math.sin(i * .05) * 2 * dpr); g.lineTo(c.width, i + Math.cos(i * .03) * 2 * dpr); g.stroke();
+  }
+  g.globalAlpha = 1;
+  // Ziel
+  const Z = level.goal;
+  g.fillStyle = '#2f7d3a';
+  g.beginPath(); g.arc(Z.x * s, Z.y * s, GOAL_R * 1.15 * s, 0, 7); g.fill();
+  const zg = g.createRadialGradient(Z.x * s, Z.y * s, 0, Z.x * s, Z.y * s, GOAL_R * s);
+  zg.addColorStop(0, '#0d2410'); zg.addColorStop(1, '#1f5a28');
+  g.fillStyle = zg; g.beginPath(); g.arc(Z.x * s, Z.y * s, GOAL_R * s, 0, 7); g.fill();
+  // Löcher
+  for (const o of level.holes) {
+    g.fillStyle = '#8a5a2c';
+    g.beginPath(); g.arc(o.x * s, o.y * s, HOLE_R * 1.18 * s, 0, 7); g.fill();
+    const hg = g.createRadialGradient(o.x * s - .08 * s, o.y * s - .08 * s, 0, o.x * s, o.y * s, HOLE_R * s);
+    hg.addColorStop(0, '#000'); hg.addColorStop(1, '#2a1709');
+    g.fillStyle = hg; g.beginPath(); g.arc(o.x * s, o.y * s, HOLE_R * s, 0, 7); g.fill();
+  }
+  // Schatten der Wände
+  g.fillStyle = 'rgba(40,20,5,.28)';
+  for (let y = 0; y < level.rows; y++) for (let x = 0; x < level.cols; x++)
+    if (level.wall[y][x]) g.fillRect(x * s + .12 * s, y * s + .12 * s, s, s);
+  // Wände
+  for (let y = 0; y < level.rows; y++) for (let x = 0; x < level.cols; x++) {
+    if (!level.wall[y][x]) continue;
+    g.fillStyle = '#5b3a1e'; g.fillRect(x * s, y * s, s, s);
+    g.fillStyle = '#7a5130'; g.fillRect(x * s, y * s, s, s * .18);
+  }
+  return c;
+}
+
+function draw() {
+  if (!level) return;
+  if (!boardCache) boardCache = renderBoard();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(boardCache, 0, 0);
+  const s = cellPx * dpr;
+  let r = BALL_R * s;
+  if (ball.falling) r *= Math.max(0.15, 1 - ball.fallT / 0.55);
+  const bx = ball.x * s, by = ball.y * s;
+  // Schatten
+  ctx.fillStyle = 'rgba(30,15,0,.35)';
+  ctx.beginPath(); ctx.ellipse(bx + r * .25, by + r * .3, r, r * .9, 0, 0, 7); ctx.fill();
+  // Stahlkugel, Glanzpunkt wandert mit der Neigung
+  const hx = bx - r * (.35 + tilt.gx * .3), hy = by - r * (.35 + tilt.gy * .3);
+  const bg = ctx.createRadialGradient(hx, hy, r * .05, bx, by, r);
+  bg.addColorStop(0, '#ffffff'); bg.addColorStop(.25, '#d9dde2'); bg.addColorStop(.7, '#7b8590'); bg.addColorStop(1, '#3b424a');
+  ctx.fillStyle = bg; ctx.beginPath(); ctx.arc(bx, by, r, 0, 7); ctx.fill();
+}
+
+/* ================================================================
+   Spielablauf
+   ================================================================ */
+let lastT = 0, rafId = 0;
+function loop(t) {
+  const dt = Math.min(1 / 30, (t - lastT) / 1000 || 0);
+  lastT = t;
+  if (running && !finished) { elapsed = (performance.now() - tStart) / 1000; updateHud(); }
+  if (running) step(dt);
+  draw();
+  rafId = requestAnimationFrame(loop);
+}
+
+function fmtTime(s) { return s.toFixed(1).replace('.', ',') + ' s'; }
+function updateHud() {
+  $('hudTime').textContent = fmtTime(elapsed);
+  $('hudFalls').textContent = '⚫ ' + falls;
+}
+
+function showStart() {
+  $('startTitle').textContent = 'Level ' + (levelIdx + 1) + ' · ' + level.name;
+  $('ovStart').hidden = false;
+  $('sensorNote').textContent = '';
+}
+
+async function startRun() {
+  if (sensorState !== 'ok') sensorState = await requestSensor();
+  if (sensorState === 'denied') $('sensorNote').textContent = 'Bewegungssensor abgelehnt. iPhone: App neu öffnen und Zugriff erlauben. Pfeiltasten gehen trotzdem.';
+  if (sensorState === 'none') $('sensorNote').textContent = 'Kein Bewegungssensor gefunden – Steuerung mit Pfeiltasten/WASD.';
+  // Ohne Sensor: Hinweis einmal zeigen, zweiter Tipp startet mit Tastatursteuerung
+  if (sensorState !== 'ok' && !$('sensorNote').dataset.shown) { $('sensorNote').dataset.shown = 1; $('startBtn').textContent = 'Trotzdem starten'; return; }
+  // Kurz warten, damit ein erster Messwert da ist, dann Nullpunkt setzen
+  setTimeout(() => {
+    calibrate();
+    $('ovStart').hidden = true;
+    resetBall();
+    tStart = performance.now(); elapsed = 0; running = true; finished = false;
+    lockScreen();
+  }, 150);
+}
+
+function win() {
+  running = false;
+  const key = mode + ':' + levelIdx;
+  const prev = best[key];
+  const isBest = !prev || elapsed < prev;
+  if (isBest) { best[key] = elapsed; store.set('best', best); }
+  if (levelIdx + 2 > unlocked && levelIdx + 1 < LEVELS.length) { unlocked = levelIdx + 2; store.set('unlocked', unlocked); }
+  $('winText').textContent = 'Zeit ' + fmtTime(elapsed) + ' · ' + falls + '× gefallen' + (isBest ? ' · neue Bestzeit!' : ' · Bestzeit ' + fmtTime(prev));
+  $('nextBtn').hidden = levelIdx + 1 >= LEVELS.length;
+  $('ovWin').hidden = false;
+  vibrate([40, 60, 40]);
+  releaseScreen();
+}
+
+let wakeLock = null;
+async function lockScreen() { try { wakeLock = await navigator.wakeLock.request('screen'); } catch (_) {} }
+function releaseScreen() { try { wakeLock && wakeLock.release(); } catch (_) {} wakeLock = null; }
+
+/* ================================================================
+   Menü
+   ================================================================ */
+function renderMenu() {
+  $('modes').innerHTML = '';
+  for (const m of MODES) {
+    const d = document.createElement('div');
+    d.className = 'card' + (m.ready ? ' pick' : ' off') + (m.id === mode ? ' sel' : '');
+    d.innerHTML = '<div><b></b><small></small></div><span></span>';
+    d.querySelector('b').textContent = m.name;
+    d.querySelector('small').textContent = m.desc;
+    d.querySelector('span').textContent = m.ready ? (m.id === mode ? '●' : '○') : 'geplant';
+    if (m.ready) d.onclick = () => { mode = m.id; renderMenu(); };
+    $('modes').appendChild(d);
+  }
+  $('levels').innerHTML = '';
+  LEVELS.forEach((L, i) => {
+    const b = document.createElement('button');
+    b.className = 'lvl';
+    b.disabled = i + 1 > unlocked;
+    const bt = best[mode + ':' + i];
+    b.innerHTML = '<b>' + (i + 1) + '</b><small></small>';
+    b.querySelector('small').textContent = bt ? fmtTime(bt) : L.name;
+    b.onclick = () => openGame(i);
+    $('levels').appendChild(b);
+  });
+  $('sens').value = settings.sens; $('fric').value = settings.fric;
+}
+
+function openGame(i) {
+  $('menu').hidden = true; $('game').hidden = false;
+  $('ovWin').hidden = true;
+  loadLevel(i);
+  showStart();
+}
+function closeGame() {
+  running = false; releaseScreen();
+  $('game').hidden = true; $('menu').hidden = false;
+  renderMenu();
+}
+
+$('back').onclick = closeGame;
+$('startBtn').onclick = startRun;
+$('calib').onclick = () => { calibrate(); showInfo('Nullpunkt gesetzt', 1.5, $('calib')); };
+$('retryBtn').onclick = () => { $('ovWin').hidden = true; loadLevel(levelIdx); showStart(); };
+$('nextBtn').onclick = () => { $('ovWin').hidden = true; loadLevel(levelIdx + 1); showStart(); };
+$('sens').oninput = e => { settings.sens = +e.target.value; store.set('sens', settings.sens); };
+$('fric').oninput = e => { settings.fric = +e.target.value; store.set('fric', settings.fric); };
+window.addEventListener('keydown', e => keys.add(e.key));
+window.addEventListener('keyup', e => keys.delete(e.key));
+window.addEventListener('resize', resize);
+document.addEventListener('visibilitychange', () => {
+  // Im Hintergrund pausieren: Zeit anhalten, beim Zurückkommen Start-Dialog zeigen
+  if (document.visibilityState === 'hidden' && running && !finished) { running = false; showStart(); }
+});
+
+renderMenu();
+$('version').textContent = 'v' + APP_VERSION;
+rafId = requestAnimationFrame(loop);
+
+/* ================================================================
+   Update-Mechanismus (Banner, aktive Prüfung, Meldung nach Update)
+   ================================================================ */
+const updateEl = $('update');
+let infoTimer = null, ausTimer = null;
+function einblenden() {
+  clearTimeout(ausTimer);
+  updateEl.hidden = false; void updateEl.offsetWidth;
+  updateEl.classList.add('an');
+}
+function ausblenden() {
+  updateEl.classList.remove('an'); clearTimeout(ausTimer);
+  ausTimer = setTimeout(() => { if (!updateEl.classList.contains('an')) updateEl.hidden = true; }, 380);
+}
+function bannerAnKante(ausloeser) {
+  if (!ausloeser) { updateEl.classList.remove('unten'); return; }
+  const r = ausloeser.getBoundingClientRect();
+  updateEl.classList.toggle('unten', r.top + r.height / 2 > window.innerHeight / 2);
+}
+function showInfo(text, sekunden = 2, ausloeser = null) {
+  const an = updateEl.classList.contains('an');
+  updateEl.className = 'update info' + (an ? ' an' : '');
+  bannerAnKante(ausloeser);
+  $('update-text').textContent = text;
+  $('update-go').hidden = true;
+  einblenden();
+  clearTimeout(infoTimer);
+  if (sekunden) infoTimer = setTimeout(() => {
+    if (updateEl.classList.contains('info')) ausblenden();
+  }, sekunden * 1000);
+}
+function zeigeBanner(text) {
+  updateEl.className = 'update' + (updateEl.classList.contains('an') ? ' an' : '');
+  bannerAnKante(null);
+  $('update-text').textContent = text;
+  $('update-go').hidden = false;
+  einblenden();
+}
+function speichereAlles() {
+  store.set('sens', settings.sens); store.set('fric', settings.fric);
+  store.set('unlocked', unlocked); store.set('best', best);
+}
+updateEl.addEventListener('click', () => { if (updateEl.classList.contains('info')) ausblenden(); });
+$('update-go').addEventListener('click', () => { speichereAlles(); location.reload(); });
+
+let checking = false, announced = null;
+async function checkForUpdate(manual = false) {
+  if (checking) return;
+  if (!manual && document.visibilityState !== 'visible') return;
+  if (!navigator.onLine) { if (manual) showInfo('Offline – Prüfung nicht möglich', 2, $('version')); return; }
+  checking = true;
+  try {
+    const res = await fetch('index.html', { cache: 'no-store' });
+    if (!res.ok) return;
+    const m = (await res.text()).match(/APP_VERSION = '([^']+)'/);
+    if (m && m[1] !== APP_VERSION) announceUpdate(m[1], manual);
+    else if (manual) showInfo('Version ' + APP_VERSION + ' ist aktuell', 4, $('version'));
+  } catch (_) { if (manual) showInfo('Prüfung fehlgeschlagen', 2, $('version')); }
+  finally { checking = false; }
+}
+function announceUpdate(v, manual) {
+  if (announced === v && !manual) return;
+  announced = v;
+  speichereAlles();
+  zeigeBanner('Neue Version ' + v + ' ist da');
+  // Nicht mitten in einem laufenden Level neu laden – dann bleibt nur der Knopf
+  const spielt = running && !finished;
+  if (manual || !spielt) setTimeout(() => location.reload(), manual ? 1500 : 3000);
+}
+window.addEventListener('pageshow', () => setTimeout(checkForUpdate, 800));
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') checkForUpdate();
+});
+$('version').addEventListener('click', () => checkForUpdate(true));
+
+{
+  const GESEHEN = 'laby.gesehen';
+  let vorher = null;
+  try { vorher = localStorage.getItem(GESEHEN); } catch (_) {}
+  if (vorher !== APP_VERSION) {
+    try { localStorage.setItem(GESEHEN, APP_VERSION); } catch (_) {}
+    if (vorher) setTimeout(() => showInfo('Version ' + APP_VERSION + ' ist geladen', 4), 400);
+  }
+}
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+</script>
+</body>
+</html>
