@@ -147,7 +147,7 @@
 </div>
 
 <script>
-const APP_VERSION = '0.6';          // bei JEDER Änderung hochzählen
+const APP_VERSION = '0.7';          // bei JEDER Änderung hochzählen
 
 /* ================================================================
    Spielarten – bisher nur "classic" spielbar, der Rest ist geplant
@@ -598,6 +598,50 @@ function renderBoard() {
   return c;
 }
 
+// Kuhle plastisch schattieren – pixelgenau aus demselben Abstandsfeld wie die Physik
+// (nächste Abgrundkante, auch diagonal), dadurch stimmen Kurven und Ecken von selbst.
+// Höhe z(d) = H·(1 − d/w)², Normale aus dem Gradienten, Licht von links oben.
+// H ist optisch überhöht und wächst mit dem Randanstieg, damit man die Mulde sieht.
+function shadeGutter(g, s, isVoid) {
+  const deg = settings.rimDeg, w = settings.rimW;
+  if (mode !== 'edge' || deg <= 0) return;
+  const H = w * (0.25 + deg / 25 * 1.1);
+  const L = [-0.5, -0.62, 0.6], ln = Math.hypot(...L);
+  const lx = L[0] / ln, ly = L[1] / ln, lz = L[2] / ln;
+  const img = g.getImageData(0, 0, g.canvas.width, g.canvas.height), px = img.data, Wd = img.width;
+  const R = level.rows, C = level.cols;
+  for (let cy = 0; cy < R; cy++) for (let cx = 0; cx < C; cx++) {
+    if (level.wall[cy][cx]) continue;
+    // nur Felder mit Abgrund in der Nachbarschaft brauchen Schattierung
+    const near = [];
+    for (let y = cy - 1; y <= cy + 1; y++) for (let x = cx - 1; x <= cx + 1; x++)
+      if (isVoid(x, y)) near.push(x, y);
+    if (!near.length) continue;
+    const x0 = Math.floor(cx * s), x1 = Math.floor((cx + 1) * s), y0 = Math.floor(cy * s), y1 = Math.floor((cy + 1) * s);
+    for (let yy = y0; yy < y1; yy++) for (let xx = x0; xx < x1; xx++) {
+      const fx = (xx + .5) / s, fy = (yy + .5) / s;
+      let d = w, nx = 0, ny = 0;
+      for (let i = 0; i < near.length; i += 2) {
+        const vx = near[i], vy = near[i + 1];
+        const qx = Math.max(vx, Math.min(fx, vx + 1)), qy = Math.max(vy, Math.min(fy, vy + 1));
+        const dx = fx - qx, dy = fy - qy, dd = Math.hypot(dx, dy);
+        if (dd < d && dd > 1e-6) { d = dd; nx = dx / dd; ny = dy / dd; }
+      }
+      if (d >= w) continue;
+      const u = 1 - d / w;
+      const slope = -H * 2 * u / w;              // dz/dd (< 0: fällt zur Mitte hin ab)
+      const gx = slope * nx, gy = slope * ny;    // ∇z
+      const inv = 1 / Math.hypot(gx, gy, 1);
+      const I = (-gx * lx - gy * ly + lz) * inv;  // Lambert
+      // Abdunklung begrenzen: Schattenseite darf nicht wie Abgrund aussehen
+      const f = Math.max(0.72, Math.min(1.45, 1 + (I - lz) / lz * 0.75 + u * u * 0.08));
+      const o = (yy * Wd + xx) * 4;
+      px[o] = Math.min(255, px[o] * f); px[o + 1] = Math.min(255, px[o + 1] * f); px[o + 2] = Math.min(255, px[o + 2] * f);
+    }
+  }
+  g.putImageData(img, 0, 0);
+}
+
 // Ohne Banden: Abgrund statt Wänden, Wegränder als helle Holzkante mit Schlagschatten
 function drawVoid(g, s) {
   const W = level.wall, R = level.rows, C = level.cols;
@@ -608,21 +652,7 @@ function drawVoid(g, s) {
     vg.addColorStop(0, '#0b0603'); vg.addColorStop(1, '#140b05');
     g.fillStyle = vg; g.fillRect(x * s, y * s, s + 1, s + 1);
   }
-  // Kuhle andeuten: Licht auf dem ansteigenden Rand
-  const rimA = Math.min(.75, .2 + settings.rimDeg / 25 * .55) * (settings.rimDeg > 0), rw = settings.rimW * s;
-  if (rimA > 0) for (let y = 0; y < R; y++) for (let x = 0; x < C; x++) {
-    if (W[y][x]) continue;
-    const band = (x0, y0, x1, y1, rx, ry, rwid, rhei) => {
-      const lg = g.createLinearGradient(x0, y0, x1, y1);
-      lg.addColorStop(0, 'rgba(255,238,205,' + rimA + ')'); lg.addColorStop(1, 'rgba(255,238,205,0)');
-      g.fillStyle = lg; g.fillRect(rx, ry, rwid, rhei);
-    };
-    const X = x * s, Y = y * s;
-    if (isVoid(x, y - 1)) band(0, Y, 0, Y + rw, X, Y, s, rw);
-    if (isVoid(x, y + 1)) band(0, Y + s, 0, Y + s - rw, X, Y + s - rw, s, rw);
-    if (isVoid(x - 1, y)) band(X, 0, X + rw, 0, X, Y, rw, s);
-    if (isVoid(x + 1, y)) band(X + s, 0, X + s - rw, 0, X + s - rw, Y, rw, s);
-  }
+  shadeGutter(g, s, isVoid);
   const k = Math.max(2, s * .07);
   for (let y = 0; y < R; y++) for (let x = 0; x < C; x++) {
     if (W[y][x]) continue;
