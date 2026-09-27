@@ -50,9 +50,10 @@
   #version { text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
 
   #game { position: relative; }
-  .hud { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; gap: 8px; }
-  .hud .stat { font-variant-numeric: tabular-nums; font-weight: 600; }
-  .hud .btn { padding: 8px 12px; font-size: 14px; }
+  .hud { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; gap: 6px; }
+  .hud .stat { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 15px; white-space: nowrap; }
+  .hud .btn { padding: 8px 10px; font-size: 14px; min-width: 40px; white-space: nowrap; }
+  .hud .btn.aus { opacity: .4; text-decoration: line-through; }
   #stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
   canvas { display: block; touch-action: none; }
   .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
@@ -105,11 +106,13 @@
 <!-- ========== Spiel ========== -->
 <section class="screen" id="game" hidden>
   <div class="hud">
-    <button class="btn ghost" id="back">‹ Menü</button>
+    <button class="btn ghost" id="back" aria-label="Menü">‹ Menü</button>
+    <button class="btn ghost" id="restart" aria-label="Level neu starten">↻</button>
     <span class="stat" id="hudLevel"></span>
     <span class="stat" id="hudTime">0,0 s</span>
     <span class="stat" id="hudFalls">⚫ 0</span>
-    <button class="btn ghost" id="calib" title="Aktuelle Haltung als waagerecht setzen">⊙ Null</button>
+    <button class="btn ghost" id="ghostBtn" aria-label="Geisterkugel an/aus">👻</button>
+    <button class="btn ghost" id="calib" aria-label="Aktuelle Haltung als Nullpunkt setzen">⊙ Null</button>
   </div>
   <div id="stage"><canvas id="cv"></canvas></div>
 
@@ -140,7 +143,7 @@
 </div>
 
 <script>
-const APP_VERSION = '0.3';          // bei JEDER Änderung hochzählen
+const APP_VERSION = '0.4';          // bei JEDER Änderung hochzählen
 
 /* ================================================================
    Spielarten – bisher nur "classic" spielbar, der Rest ist geplant
@@ -664,13 +667,28 @@ async function startRun() {
   if (sensorState === 'none') $('sensorNote').textContent = 'Kein Bewegungssensor gefunden – Steuerung mit Pfeiltasten/WASD.';
   // Ohne Sensor: Hinweis einmal zeigen, zweiter Tipp startet mit Tastatursteuerung
   if (sensorState !== 'ok' && !$('sensorNote').dataset.shown) { $('sensorNote').dataset.shown = 1; $('startBtn').textContent = 'Trotzdem starten'; return; }
-  setTimeout(() => {
-    $('ovStart').hidden = true;
-    resetBall();
-    rec = []; loadGhost();
-    tStart = performance.now(); elapsed = 0; running = true; finished = false;
-    lockScreen();
-  }, 150);
+  setTimeout(beginRun, 150);
+}
+
+function beginRun() {
+  $('ovStart').hidden = true; $('ovWin').hidden = true;
+  resetBall();
+  falls = 0; updateHud();
+  rec = []; loadGhost();
+  tStart = performance.now(); elapsed = 0; running = true; finished = false;
+  lockScreen();
+}
+
+// ↻: Versuch abbrechen und sofort neu starten (Sensor läuft schon), sonst Startdialog
+function restartLevel() {
+  if (sensorState === 'ok' || $('sensorNote').dataset.shown) beginRun();
+  else { running = false; resetBall(); falls = 0; elapsed = 0; updateHud(); showStart(); }
+}
+
+function setGhost(on) {
+  settings.ghost = on; store.set('ghost', on);
+  $('ghostBtn').classList.toggle('aus', !on);
+  $('ghostOn').checked = on;
 }
 
 function win() {
@@ -747,7 +765,13 @@ $('retryBtn').onclick = () => { $('ovWin').hidden = true; loadLevel(levelIdx); s
 $('nextBtn').onclick = () => { $('ovWin').hidden = true; loadLevel(levelIdx + 1); showStart(); };
 $('sens').oninput = e => { settings.sens = +e.target.value; store.set('sens', settings.sens); };
 $('fric').oninput = e => { settings.fric = +e.target.value; store.set('fric', settings.fric); };
-$('ghostOn').onchange = e => { settings.ghost = e.target.checked; store.set('ghost', settings.ghost); };
+$('ghostOn').onchange = e => setGhost(e.target.checked);
+$('ghostBtn').onclick = () => {
+  setGhost(!settings.ghost);
+  const t = settings.ghost ? (ghost ? 'Geisterkugel an' : 'Geisterkugel an – noch kein Bestlauf gespeichert') : 'Geisterkugel aus';
+  showInfo(t, 1.5, $('ghostBtn'));
+};
+$('restart').onclick = restartLevel;
 window.addEventListener('keydown', e => keys.add(e.key));
 window.addEventListener('keyup', e => keys.delete(e.key));
 window.addEventListener('resize', resize);
@@ -758,6 +782,7 @@ document.addEventListener('visibilitychange', () => {
 
 renderMenu();
 showZero();
+setGhost(settings.ghost);
 $('version').textContent = 'v' + APP_VERSION;
 rafId = requestAnimationFrame(loop);
 

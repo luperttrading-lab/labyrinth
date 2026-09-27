@@ -93,6 +93,21 @@ await tiltTo(0, 0); await p.waitForTimeout(900);
 q = await pos();
 check('ohne Banden: Neustart am Start', Math.abs(q.x - 1.5) < 0.3 && Math.abs(q.y - 1.5) < 0.3, q);
 
+// ↻ Neustart: Versuch abbrechen, Kugel an den Start, Zeit und Stürze auf null
+await tiltTo(0, 12); await p.waitForTimeout(600);
+await p.click('#restart'); await tiltTo(0, 0); await p.waitForTimeout(100);
+q = await p.evaluate(() => ({ x: ball.x, y: ball.y, falls, elapsed, running, rec: rec.length }));
+check('↻ startet das Level sofort neu', Math.abs(q.x - 1.5) < 0.05 && q.falls === 0 && q.elapsed < 0.3 && q.running, q);
+
+// 👻 schaltet die Geisterkugel um, Menü-Häkchen zieht mit, Zustand bleibt gespeichert
+const before = await p.evaluate(() => settings.ghost);
+await p.click('#ghostBtn');
+const t1 = await p.evaluate(() => [settings.ghost, localStorage.getItem('laby.ghost'),
+  document.getElementById('ghostOn').checked, document.getElementById('ghostBtn').classList.contains('aus')]);
+check('👻 schaltet aus', before === true && t1[0] === false && t1[1] === 'false' && t1[2] === false && t1[3] === true, t1);
+await p.click('#ghostBtn');
+check('👻 schaltet wieder an', await p.evaluate(() => settings.ghost === true), {});
+
 check('keine JS-Fehler', errs.length === 0, errs);
 await b.close();
 process.exit(ok ? 0 : 1);
