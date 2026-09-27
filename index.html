@@ -95,6 +95,7 @@
   <div class="settings">
     <label>Empfindlichkeit <input type="range" id="sens" min="0.4" max="2" step="0.1"></label>
     <label>Rollwiderstand <input type="range" id="fric" min="0.2" max="3" step="0.1"></label>
+    <label>Nullpunkt <span class="row"><span id="zeroInfo"></span><button class="btn ghost" id="zeroReset">Waagerecht</button></span></label>
   </div>
 
   <div class="foot">Labyrinth · <span id="version"></span></div>
@@ -114,7 +115,7 @@
   <div class="overlay" id="ovStart" hidden>
     <div class="box">
       <h3 id="startTitle">Level 1</h3>
-      <p id="startText">Leg das Handy flach hin oder halte es waagerecht. Tipp auf Start – die aktuelle Haltung gilt dann als „waagerecht“.</p>
+      <p id="startText"></p>
       <div class="row"><button class="btn" id="startBtn">Start</button></div>
       <p id="sensorNote" style="font-size:13px;margin-top:12px"></p>
     </div>
@@ -138,13 +139,14 @@
 </div>
 
 <script>
-const APP_VERSION = '0.1';          // bei JEDER Änderung hochzählen
+const APP_VERSION = '0.2';          // bei JEDER Änderung hochzählen
 
 /* ================================================================
    Spielarten – bisher nur "classic" spielbar, der Rest ist geplant
    ================================================================ */
 const MODES = [
   { id: 'classic', name: 'Klassisch', desc: 'Löcher meiden, Kugel ins Ziel', ready: true },
+  { id: 'edge',    name: 'Ohne Banden', desc: 'Keine Wände – wer vom Weg rollt, fällt', ready: true },
   { id: 'multi',   name: 'Mehrere Kugeln', desc: 'Alle Kugeln in ihre Mulden', ready: false },
   { id: 'hold',    name: 'Ruhe halten', desc: 'Kugel X Sekunden im Zielfeld halten', ready: false },
   { id: 'dark',    name: 'Dunkel', desc: 'Nur Umgebung der Kugel sichtbar', ready: false },
@@ -267,7 +269,9 @@ const store = {
 };
 const settings = { sens: store.get('sens', 1), fric: store.get('fric', 1) };
 let mode = 'classic';
-let unlocked = store.get('unlocked', 1);
+let unlocked = store.get('unlocked', {});
+if (typeof unlocked === 'number') unlocked = { classic: unlocked };
+const unlockedOf = m => unlocked[m] || 1;
 let best = store.get('best', {});
 
 const $ = id => document.getElementById(id);
@@ -283,7 +287,11 @@ let boardCache = null;
 /* ================================================================
    Neigung: DeviceOrientation (beta/gamma) → Schwerkraft in Bildschirm-Koordinaten
    ================================================================ */
-const tilt = { gx: 0, gy: 0, rawB: 0, rawG: 0, zeroB: 0, zeroG: 0, have: false };
+// Nullpunkt: Standard ist absolut waagerecht (0°/0°). Eine andere Haltung wird nur
+// über den Knopf „⊙ Null“ gesetzt und bleibt gespeichert, bis man sie zurücksetzt.
+const savedZero = store.get('zero', null);
+const tilt = { gx: 0, gy: 0, rawB: 0, rawG: 0,
+  zeroB: savedZero ? savedZero.b : 0, zeroG: savedZero ? savedZero.g : 0, have: false };
 const keys = new Set();
 
 function onOrientation(e) {
@@ -295,7 +303,20 @@ function screenAngle() {
   if (screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle;
   return typeof window.orientation === 'number' ? (window.orientation + 360) % 360 : 0;
 }
-function calibrate() { tilt.zeroB = tilt.rawB; tilt.zeroG = tilt.rawG; }
+function calibrate() {
+  tilt.zeroB = tilt.rawB; tilt.zeroG = tilt.rawG;
+  store.set('zero', { b: tilt.zeroB, g: tilt.zeroG });
+  showZero();
+}
+function resetZero() { tilt.zeroB = 0; tilt.zeroG = 0; store.set('zero', null); showZero(); }
+const isCustomZero = () => tilt.zeroB !== 0 || tilt.zeroG !== 0;
+function fmtDeg(x) { return Math.round(x) + '°'; }
+function showZero() {
+  $('zeroInfo').textContent = isCustomZero()
+    ? 'eigener (' + fmtDeg(tilt.zeroB) + ' / ' + fmtDeg(tilt.zeroG) + ')' : 'waagerecht';
+  $('zeroReset').hidden = !isCustomZero();
+  $('calib').textContent = isCustomZero() ? '⊙ Null*' : '⊙ Null';
+}
 
 function readTilt() {
   let dx = 0, dy = 0;
@@ -396,7 +417,8 @@ function step(dt) {
     if (sp > MAX_SPEED) { ball.vx *= MAX_SPEED / sp; ball.vy *= MAX_SPEED / sp; }
     ball.x += ball.vx * h;
     ball.y += ball.vy * h;
-    collideWalls();
+    if (mode === 'edge') { if (overVoid()) { startFall(ball.x + ball.vx * .08, ball.y + ball.vy * .08); return; } }
+    else collideWalls();
   }
 
   // Ziel?
@@ -421,6 +443,14 @@ function step(dt) {
     }
   }
 }
+
+// Ohne Banden: Wandfelder sind Abgrund. Die Kugel kippt, sobald ihr Mittelpunkt
+// nicht mehr über Boden liegt.
+function overVoid() {
+  const cx = Math.floor(ball.x), cy = Math.floor(ball.y);
+  return cy < 0 || cx < 0 || cy >= level.rows || cx >= level.cols || level.wall[cy][cx];
+}
+function startFall(x, y) { ball.falling = true; ball.fallT = 0; ball.fallX = x; ball.fallY = y; }
 
 let lastBump = 0;
 function collideWalls() {
@@ -493,6 +523,7 @@ function renderBoard() {
     hg.addColorStop(0, '#000'); hg.addColorStop(1, '#2a1709');
     g.fillStyle = hg; g.beginPath(); g.arc(o.x * s, o.y * s, HOLE_R * s, 0, 7); g.fill();
   }
+  if (mode === 'edge') { drawVoid(g, s); return c; }
   // Schatten der Wände
   g.fillStyle = 'rgba(40,20,5,.28)';
   for (let y = 0; y < level.rows; y++) for (let x = 0; x < level.cols; x++)
@@ -504,6 +535,33 @@ function renderBoard() {
     g.fillStyle = '#7a5130'; g.fillRect(x * s, y * s, s, s * .18);
   }
   return c;
+}
+
+// Ohne Banden: Abgrund statt Wänden, Wegränder als helle Holzkante mit Schlagschatten
+function drawVoid(g, s) {
+  const W = level.wall, R = level.rows, C = level.cols;
+  const isVoid = (x, y) => y < 0 || x < 0 || y >= R || x >= C || W[y][x];
+  for (let y = 0; y < R; y++) for (let x = 0; x < C; x++) {
+    if (!W[y][x]) continue;
+    const vg = g.createLinearGradient(0, y * s, 0, (y + 1) * s);
+    vg.addColorStop(0, '#0b0603'); vg.addColorStop(1, '#140b05');
+    g.fillStyle = vg; g.fillRect(x * s, y * s, s + 1, s + 1);
+  }
+  const k = Math.max(2, s * .07);
+  for (let y = 0; y < R; y++) for (let x = 0; x < C; x++) {
+    if (W[y][x]) continue;
+    // Seitenwand des Stegs unter einer Kante, die zum Abgrund hin abfällt
+    if (isVoid(x, y + 1)) {
+      g.fillStyle = '#6b4520'; g.fillRect(x * s, (y + 1) * s, s, s * .22);
+      g.fillStyle = 'rgba(0,0,0,.35)'; g.fillRect(x * s, (y + 1) * s + s * .22, s, s * .12);
+    }
+    g.fillStyle = '#f0cf9c';
+    if (isVoid(x, y - 1)) g.fillRect(x * s, y * s, s, k);
+    if (isVoid(x - 1, y)) g.fillRect(x * s, y * s, k, s);
+    g.fillStyle = '#9c6b3a';
+    if (isVoid(x + 1, y)) g.fillRect((x + 1) * s - k, y * s, k, s);
+    if (isVoid(x, y + 1)) g.fillRect(x * s, (y + 1) * s - k, s, k);
+  }
 }
 
 function draw() {
@@ -546,6 +604,12 @@ function updateHud() {
 
 function showStart() {
   $('startTitle').textContent = 'Level ' + (levelIdx + 1) + ' · ' + level.name;
+  $('startText').textContent = (mode === 'edge'
+      ? 'Keine Banden: Rollt die Kugel über den Wegrand, fällt sie hinunter. '
+      : 'Löcher meiden, ins grüne Ziel rollen. ')
+    + (isCustomZero()
+      ? 'Nullpunkt: deine gespeicherte Haltung. Zurück auf waagerecht im Menü.'
+      : 'Nullpunkt: waagerecht. Willst du schräg halten, halte das Handy so und tippe oben auf „⊙ Null“.');
   $('ovStart').hidden = false;
   $('sensorNote').textContent = '';
 }
@@ -556,9 +620,7 @@ async function startRun() {
   if (sensorState === 'none') $('sensorNote').textContent = 'Kein Bewegungssensor gefunden – Steuerung mit Pfeiltasten/WASD.';
   // Ohne Sensor: Hinweis einmal zeigen, zweiter Tipp startet mit Tastatursteuerung
   if (sensorState !== 'ok' && !$('sensorNote').dataset.shown) { $('sensorNote').dataset.shown = 1; $('startBtn').textContent = 'Trotzdem starten'; return; }
-  // Kurz warten, damit ein erster Messwert da ist, dann Nullpunkt setzen
   setTimeout(() => {
-    calibrate();
     $('ovStart').hidden = true;
     resetBall();
     tStart = performance.now(); elapsed = 0; running = true; finished = false;
@@ -572,7 +634,7 @@ function win() {
   const prev = best[key];
   const isBest = !prev || elapsed < prev;
   if (isBest) { best[key] = elapsed; store.set('best', best); }
-  if (levelIdx + 2 > unlocked && levelIdx + 1 < LEVELS.length) { unlocked = levelIdx + 2; store.set('unlocked', unlocked); }
+  if (levelIdx + 2 > unlockedOf(mode) && levelIdx + 1 < LEVELS.length) { unlocked[mode] = levelIdx + 2; store.set('unlocked', unlocked); }
   $('winText').textContent = 'Zeit ' + fmtTime(elapsed) + ' · ' + falls + '× gefallen' + (isBest ? ' · neue Bestzeit!' : ' · Bestzeit ' + fmtTime(prev));
   $('nextBtn').hidden = levelIdx + 1 >= LEVELS.length;
   $('ovWin').hidden = false;
@@ -603,7 +665,7 @@ function renderMenu() {
   LEVELS.forEach((L, i) => {
     const b = document.createElement('button');
     b.className = 'lvl';
-    b.disabled = i + 1 > unlocked;
+    b.disabled = i + 1 > unlockedOf(mode);
     const bt = best[mode + ':' + i];
     b.innerHTML = '<b>' + (i + 1) + '</b><small></small>';
     b.querySelector('small').textContent = bt ? fmtTime(bt) : L.name;
@@ -627,7 +689,8 @@ function closeGame() {
 
 $('back').onclick = closeGame;
 $('startBtn').onclick = startRun;
-$('calib').onclick = () => { calibrate(); showInfo('Nullpunkt gesetzt', 1.5, $('calib')); };
+$('calib').onclick = () => { calibrate(); showInfo('Aktuelle Haltung ist jetzt der Nullpunkt', 2, $('calib')); };
+$('zeroReset').onclick = () => { resetZero(); showInfo('Nullpunkt: waagerecht', 1.5, $('zeroReset')); };
 $('retryBtn').onclick = () => { $('ovWin').hidden = true; loadLevel(levelIdx); showStart(); };
 $('nextBtn').onclick = () => { $('ovWin').hidden = true; loadLevel(levelIdx + 1); showStart(); };
 $('sens').oninput = e => { settings.sens = +e.target.value; store.set('sens', settings.sens); };
@@ -641,6 +704,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 renderMenu();
+showZero();
 $('version').textContent = 'v' + APP_VERSION;
 rafId = requestAnimationFrame(loop);
 

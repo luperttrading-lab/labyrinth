@@ -53,6 +53,40 @@ if (process.env.SHOT_DIR) {
   await tiltTo(8, 10); await p.waitForTimeout(700);
   await p.screenshot({ path: process.env.SHOT_DIR + '/game.png' });
 }
+// Nullpunkt: Start rechnet absolut waagerecht, "⊙ Null" übernimmt die aktuelle Haltung
+await p.click('#back');
+await p.click('.lvl >> nth=0'); await p.click('#startBtn');
+await tiltTo(8, 0); await p.waitForTimeout(300);
+await p.evaluate(() => { ball.x = 5.5; ball.y = 1.5; ball.vx = ball.vy = 0; });
+await p.waitForTimeout(400);
+q = await pos();
+check('Standard-Nullpunkt waagerecht: 8° Neigung rollt', q.y > 1.55, q);
+await p.click('#calib'); await p.waitForTimeout(200);
+await p.evaluate(() => { ball.x = 5.5; ball.y = 1.5; ball.vx = ball.vy = 0; });
+await p.waitForTimeout(500);
+q = await pos();
+check('nach ⊙ Null liegt die Kugel in dieser Haltung still', Math.abs(q.y - 1.5) < 0.02, q);
+const zero = await p.evaluate(() => JSON.parse(localStorage.getItem('laby.zero')));
+check('eigener Nullpunkt gespeichert', zero && zero.b === 8, zero);
+await p.click('#back');
+await p.click('#zeroReset');
+const z2 = await p.evaluate(() => [tilt.zeroB, tilt.zeroG, localStorage.getItem('laby.zero')]);
+check('Zurücksetzen auf waagerecht', z2[0] === 0 && z2[1] === 0 && z2[2] === 'null', z2);
+
+// Ohne Banden: nach rechts über den Wegrand hinaus → Absturz, Neustart
+await p.click('#modes .card >> nth=1');
+await p.click('.lvl >> nth=0'); await p.click('#startBtn');
+await tiltTo(0, 0); await p.waitForTimeout(300);
+if (process.env.SHOT_DIR) await p.screenshot({ path: process.env.SHOT_DIR + '/edge.png' });
+await tiltTo(0, 12);
+let fell = false;
+for (let i = 0; i < 40 && !fell; i++) { await p.waitForTimeout(100); fell = (await pos()).falls === 1; }
+q = await pos();
+check('ohne Banden: fällt über den Rand', fell, q);
+await tiltTo(0, 0); await p.waitForTimeout(900);
+q = await pos();
+check('ohne Banden: Neustart am Start', Math.abs(q.x - 1.5) < 0.3 && Math.abs(q.y - 1.5) < 0.3, q);
+
 check('keine JS-Fehler', errs.length === 0, errs);
 await b.close();
 process.exit(ok ? 0 : 1);
