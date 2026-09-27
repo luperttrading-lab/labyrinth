@@ -46,6 +46,7 @@
   .settings { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
   .settings label { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
   .settings input[type=range] { flex: 1; max-width: 55%; accent-color: var(--accent); }
+  .settings .val { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 4.2em; text-align: right; }
   .foot { margin-top: auto; padding: 16px; text-align: center; color: var(--muted); font-size: 13px; }
   #version { text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
 
@@ -97,6 +98,9 @@
     <label>Empfindlichkeit <input type="range" id="sens" min="0.4" max="2" step="0.1"></label>
     <label>Rollwiderstand <input type="range" id="fric" min="0.2" max="3" step="0.1"></label>
     <label>Geisterkugel (Bestlauf) <input type="checkbox" id="ghostOn" style="width:22px;height:22px;accent-color:var(--accent)"></label>
+    <small style="color:var(--muted)">Ohne Banden – Kuhle: der Weg steigt zum Rand hin an und hält die Kugel in der Mitte</small>
+    <label>Randanstieg <span class="val" id="rimDegVal"></span><input type="range" id="rimDeg" min="0" max="25" step="1"></label>
+    <label>Kuhlenbreite <span class="val" id="rimWVal"></span><input type="range" id="rimW" min="0.1" max="0.5" step="0.05"></label>
     <label>Nullpunkt <span class="row"><span id="zeroInfo"></span><button class="btn ghost" id="zeroReset">Waagerecht</button></span></label>
   </div>
 
@@ -143,7 +147,7 @@
 </div>
 
 <script>
-const APP_VERSION = '0.4';          // bei JEDER Änderung hochzählen
+const APP_VERSION = '0.5';          // bei JEDER Änderung hochzählen
 
 /* ================================================================
    Spielarten – bisher nur "classic" spielbar, der Rest ist geplant
@@ -271,7 +275,9 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem('laby.' + k); return v === null ? d : JSON.parse(v); } catch (_) { return d; } },
   set(k, v) { try { localStorage.setItem('laby.' + k, JSON.stringify(v)); } catch (_) {} },
 };
-const settings = { sens: store.get('sens', 1), fric: store.get('fric', 1), ghost: store.get('ghost', true) };
+const settings = { sens: store.get('sens', 1), fric: store.get('fric', 1), ghost: store.get('ghost', true),
+  rimDeg: store.get('rimDeg', 8),     // Neigung des Wegs direkt an der Kante, 0 = flach
+  rimW: store.get('rimW', 0.3) };     // ab welchem Abstand zur Kante der Weg ansteigt (Felder)
 let mode = 'classic';
 let unlocked = store.get('unlocked', {});
 if (typeof unlocked === 'number') unlocked = { classic: unlocked };
@@ -442,8 +448,9 @@ function step(dt) {
   const damp = Math.exp(-0.9 * settings.fric * h);   // Rollwiderstand, exponentiell
 
   for (let s = 0; s < SUBSTEPS; s++) {
-    ball.vx = (ball.vx + tilt.gx * acc * h) * damp;
-    ball.vy = (ball.vy + tilt.gy * acc * h) * damp;
+    const [kx, ky] = gutter();
+    ball.vx = (ball.vx + (tilt.gx + kx) * acc * h) * damp;
+    ball.vy = (ball.vy + (tilt.gy + ky) * acc * h) * damp;
     const sp = Math.hypot(ball.vx, ball.vy);
     if (sp > MAX_SPEED) { ball.vx *= MAX_SPEED / sp; ball.vy *= MAX_SPEED / sp; }
     ball.x += ball.vx * h;
@@ -481,6 +488,29 @@ function overVoid() {
   const cx = Math.floor(ball.x), cy = Math.floor(ball.y);
   return cy < 0 || cx < 0 || cy >= level.rows || cx >= level.cols || level.wall[cy][cx];
 }
+// Kuhle (nur ohne Banden): Die Weghöhe hängt vom Abstand d zur nächsten Kante ab,
+//   h(d) ∝ (1 − d/w)² für d < w, sonst 0.
+// Die Hangabtriebskraft ist −∇h: sie zeigt von der Kante weg und wächst linear von 0
+// (bei d = w) bis sin(Randanstieg) direkt an der Kante. Gerechnet wird wie die Neigung
+// als dimensionslose Beschleunigung (Anteil von g), also in denselben Einheiten wie tilt.
+// Nur die nächste Kante zählt – sonst würde sie an Feldgrenzen doppelt gezählt.
+function gutter() {
+  const k = Math.sin(settings.rimDeg * Math.PI / 180), w = settings.rimW;
+  if (mode !== 'edge' || k <= 0) return [0, 0];
+  const cx = Math.floor(ball.x), cy = Math.floor(ball.y);
+  let best = w, nx = 0, ny = 0;
+  for (let y = cy - 1; y <= cy + 1; y++) for (let x = cx - 1; x <= cx + 1; x++) {
+    const v = y < 0 || x < 0 || y >= level.rows || x >= level.cols || level.wall[y][x];
+    if (!v) continue;
+    const px = Math.max(x, Math.min(ball.x, x + 1)), py = Math.max(y, Math.min(ball.y, y + 1));
+    const dx = ball.x - px, dy = ball.y - py, d = Math.hypot(dx, dy);
+    if (d < best && d > 1e-6) { best = d; nx = dx / d; ny = dy / d; }
+  }
+  if (best >= w) return [0, 0];
+  const f = k * (1 - best / w);
+  return [nx * f, ny * f];
+}
+
 function startFall(x, y) { ball.falling = true; ball.fallT = 0; ball.fallX = x; ball.fallY = y; }
 
 let lastBump = 0;
@@ -577,6 +607,21 @@ function drawVoid(g, s) {
     const vg = g.createLinearGradient(0, y * s, 0, (y + 1) * s);
     vg.addColorStop(0, '#0b0603'); vg.addColorStop(1, '#140b05');
     g.fillStyle = vg; g.fillRect(x * s, y * s, s + 1, s + 1);
+  }
+  // Kuhle andeuten: Licht auf dem ansteigenden Rand
+  const rimA = Math.min(.75, .2 + settings.rimDeg / 25 * .55) * (settings.rimDeg > 0), rw = settings.rimW * s;
+  if (rimA > 0) for (let y = 0; y < R; y++) for (let x = 0; x < C; x++) {
+    if (W[y][x]) continue;
+    const band = (x0, y0, x1, y1, rx, ry, rwid, rhei) => {
+      const lg = g.createLinearGradient(x0, y0, x1, y1);
+      lg.addColorStop(0, 'rgba(255,238,205,' + rimA + ')'); lg.addColorStop(1, 'rgba(255,238,205,0)');
+      g.fillStyle = lg; g.fillRect(rx, ry, rwid, rhei);
+    };
+    const X = x * s, Y = y * s;
+    if (isVoid(x, y - 1)) band(0, Y, 0, Y + rw, X, Y, s, rw);
+    if (isVoid(x, y + 1)) band(0, Y + s, 0, Y + s - rw, X, Y + s - rw, s, rw);
+    if (isVoid(x - 1, y)) band(X, 0, X + rw, 0, X, Y, rw, s);
+    if (isVoid(x + 1, y)) band(X + s, 0, X + s - rw, 0, X + s - rw, Y, rw, s);
   }
   const k = Math.max(2, s * .07);
   for (let y = 0; y < R; y++) for (let x = 0; x < C; x++) {
@@ -743,6 +788,7 @@ function renderMenu() {
     $('levels').appendChild(b);
   });
   $('sens').value = settings.sens; $('fric').value = settings.fric; $('ghostOn').checked = settings.ghost;
+  $('rimDeg').value = settings.rimDeg; $('rimW').value = settings.rimW; showRim();
 }
 
 function openGame(i) {
@@ -765,6 +811,12 @@ $('retryBtn').onclick = () => { $('ovWin').hidden = true; loadLevel(levelIdx); s
 $('nextBtn').onclick = () => { $('ovWin').hidden = true; loadLevel(levelIdx + 1); showStart(); };
 $('sens').oninput = e => { settings.sens = +e.target.value; store.set('sens', settings.sens); };
 $('fric').oninput = e => { settings.fric = +e.target.value; store.set('fric', settings.fric); };
+function showRim() {
+  $('rimDegVal').textContent = settings.rimDeg ? settings.rimDeg + '°' : 'aus';
+  $('rimWVal').textContent = settings.rimW.toFixed(2).replace('.', ',') + ' F.';
+}
+$('rimDeg').oninput = e => { settings.rimDeg = +e.target.value; store.set('rimDeg', settings.rimDeg); showRim(); boardCache = null; };
+$('rimW').oninput = e => { settings.rimW = +e.target.value; store.set('rimW', settings.rimW); showRim(); boardCache = null; };
 $('ghostOn').onchange = e => setGhost(e.target.checked);
 $('ghostBtn').onclick = () => {
   setGhost(!settings.ghost);
@@ -826,6 +878,7 @@ function zeigeBanner(text) {
 }
 function speichereAlles() {
   store.set('sens', settings.sens); store.set('fric', settings.fric);
+  store.set('rimDeg', settings.rimDeg); store.set('rimW', settings.rimW);
   store.set('unlocked', unlocked); store.set('best', best);
 }
 updateEl.addEventListener('click', () => { if (updateEl.classList.contains('info')) ausblenden(); });

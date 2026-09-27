@@ -93,6 +93,26 @@ await tiltTo(0, 0); await p.waitForTimeout(900);
 q = await pos();
 check('ohne Banden: Neustart am Start', Math.abs(q.x - 1.5) < 0.3 && Math.abs(q.y - 1.5) < 0.3, q);
 
+// Kuhle: 4° Neigung Richtung Abgrund (Zeile 3 ist links Abgrund), Kugel startet ruhend
+// 0,2 Felder vor der Kante. Randanstieg 8° hält sie: Gleichgewicht bei
+// d = w·(1 − sin4°/sin8°) ≈ 0,3·0,50 = 0,15 Felder; Energie: Kuhlenhöhe zwischen d = 0,2 und 0
+// k·(w² − (w−0,2)²)/(2w) = 0,0185 > Neigungsarbeit sin4°·0,2 = 0,014 – sie kommt nicht drüber.
+// Mit Anlauf (Schwung) kann sie trotzdem hinausschießen – das ist gewollt.
+const hold = async (deg) => {
+  await p.evaluate((d) => { settings.rimDeg = d; settings.rimW = 0.3; }, deg);
+  await tiltTo(0, 0); await p.click('#restart'); await p.waitForTimeout(50);
+  const f0 = (await pos()).falls;
+  await p.evaluate(() => { ball.x = 3.5; ball.y = 2.8; ball.vx = ball.vy = 0; });
+  await tiltTo(4, 0); await p.waitForTimeout(3000);
+  const r = await pos(); r.fell = r.falls > f0; return r;
+};
+q = await hold(8);
+check('Kuhle 8° hält bei 4° Neigung, ruht ~0,15 F. vor der Kante', !q.fell && q.y > 2.8 && q.y < 2.9, q);
+q = await hold(0);
+check('ohne Kuhle rollt sie bei 4° über die Kante', q.fell, q);
+await p.evaluate(() => { settings.rimDeg = 8; });
+await tiltTo(0, 0);
+
 // ↻ Neustart: Versuch abbrechen, Kugel an den Start, Zeit und Stürze auf null
 await tiltTo(0, 12); await p.waitForTimeout(600);
 await p.click('#restart'); await tiltTo(0, 0); await p.waitForTimeout(100);
