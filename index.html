@@ -147,7 +147,7 @@
 </div>
 
 <script>
-const APP_VERSION = '0.5';          // bei JEDER Änderung hochzählen
+const APP_VERSION = '0.6';          // bei JEDER Änderung hochzählen
 
 /* ================================================================
    Spielarten – bisher nur "classic" spielbar, der Rest ist geplant
@@ -429,6 +429,7 @@ function loadLevel(i) {
    Physik
    ================================================================ */
 function step(dt) {
+  readTilt();               // auch während des Fallens, sonst wirkt nach dem Neustart kurz die alte Neigung
   if (ball.falling) {
     ball.fallT += dt;
     // Kugel wird ins Lochzentrum gezogen und schrumpft
@@ -442,7 +443,6 @@ function step(dt) {
     return;
   }
 
-  readTilt();
   const acc = BASE_ACC * settings.sens;
   const h = dt / SUBSTEPS;
   const damp = Math.exp(-0.9 * settings.fric * h);   // Rollwiderstand, exponentiell

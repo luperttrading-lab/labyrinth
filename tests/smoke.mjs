@@ -86,10 +86,12 @@ await tiltTo(0, 0); await p.waitForTimeout(300);
 if (process.env.SHOT_DIR) await p.screenshot({ path: process.env.SHOT_DIR + '/edge.png' });
 await tiltTo(0, 12);
 let fell = false;
-for (let i = 0; i < 40 && !fell; i++) { await p.waitForTimeout(100); fell = (await pos()).falls === 1; }
+// schon beim Beginn des Falls gerade halten – der Zähler springt erst beim Neustart
+for (let i = 0; i < 80 && !fell; i++) { await p.waitForTimeout(50); fell = await p.evaluate(() => ball.falling); }
+await tiltTo(0, 0);
 q = await pos();
-check('ohne Banden: fällt über den Rand', fell, q);
-await tiltTo(0, 0); await p.waitForTimeout(900);
+check('ohne Banden: fällt über den Rand', fell && q.x > 10, q);
+await p.waitForTimeout(900);
 q = await pos();
 check('ohne Banden: Neustart am Start', Math.abs(q.x - 1.5) < 0.3 && Math.abs(q.y - 1.5) < 0.3, q);
 
