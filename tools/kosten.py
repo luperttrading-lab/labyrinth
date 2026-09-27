@@ -141,7 +141,7 @@ def lokal(ts):
 # Dateien, die vor der lokalen Mitternacht zuletzt geschrieben wurden, koennen nichts
 # von heute enthalten und werden gar nicht erst geoeffnet.
 schwelle = jetzt.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-alle, projekte = {}, set()
+alle, projekte, fremd = {}, set(), False
 for p in glob.glob(f'{base}/*/*.jsonl'):
     try:
         if os.path.getmtime(p) < schwelle: continue
@@ -149,6 +149,7 @@ for p in glob.glob(f'{base}/*/*.jsonl'):
     tr, _ = lies(p)
     if any(lokal(ts) == heute_lokal for ts, _, _ in tr.values()):
         projekte.add(os.path.basename(os.path.dirname(p)))
+        if os.path.abspath(p) != os.path.abspath(f): fremd = True
     alle.update(tr)                             # message.id ist global eindeutig
 alle.update(seen)                               # eigene Sitzung sicher enthalten
 
@@ -156,6 +157,13 @@ tot   = sum(cost(mo, u) for _, mo, u in seen.values())
 heute = sum(cost(mo, u) for ts, mo, u in alle.values() if lokal(ts) == heute_lokal)
 frage = sum(cost(mo, u) for ts, mo, u in seen.values() if last_user and ts >= last_user)
 de = lambda x: f'{x:.2f}'.replace('.', ',')
+
+# In der Cloud hat jede Sitzung ihren eigenen Container und sieht nur ihr eigenes
+# Protokoll. "heute" waere dort immer gleich "ges." und taeuschte eine Tagessumme vor.
+# Deshalb faellt das Feld weg, wenn heute kein anderes Protokoll beigetragen hat und
+# die Sitzung ganz von heute ist. Reicht sie in den Vortag zurueck, ist "heute"
+# kleiner als "ges." und bleibt stehen.
+nur_diese = not fremd and de(heute) == de(tot)
 
 # "Arbeit" = Spanne vom letzten echten Nutzerbeitrag bis jetzt. Dieselbe Grenze wie
 # bei "Frage", damit beide Zahlen dasselbe meinen: Werkzeugergebnisse stehen im
@@ -182,7 +190,8 @@ def dauer():
 d = dauer()
 arbeit = f'Arbeit {d} · ' if d else ''
 print(f"<sub>{jetzt.strftime('%d.%m. %H:%M')} Uhr · {arbeit}"
-      f"Frage {de(frage)} · heute {de(heute)} · ges. {de(tot)} $</sub>")
+      f"Frage {de(frage)} · {'' if nur_diese else f'heute {de(heute)} · '}"
+      f"ges. {de(tot)} $</sub>")
 
 if '-v' in sys.argv:
     days, mods = collections.Counter(), collections.Counter()
@@ -198,4 +207,5 @@ if '-v' in sys.argv:
     if len(files) > 1:
         print('Hinweis:', len(files), 'Sitzungen in diesem Projekt; "ges." zaehlt nur die'
               ' zuletzt geaenderte.')
-    print('heute:  ', f'{len(projekte)} Projekt(e):', ', '.join(sorted(projekte)) or '-')
+    print('heute:  ', f'{len(projekte)} Projekt(e):', ', '.join(sorted(projekte)) or '-',
+          '(Feld ausgeblendet: nur diese Sitzung sichtbar)' if nur_diese else '')
