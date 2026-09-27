@@ -147,7 +147,7 @@
 </div>
 
 <script>
-const APP_VERSION = '0.7';          // bei JEDER Änderung hochzählen
+const APP_VERSION = '0.8';          // bei JEDER Änderung hochzählen
 
 /* ================================================================
    Spielarten – bisher nur "classic" spielbar, der Rest ist geplant
@@ -598,45 +598,81 @@ function renderBoard() {
   return c;
 }
 
-// Kuhle plastisch schattieren – pixelgenau aus demselben Abstandsfeld wie die Physik
-// (nächste Abgrundkante, auch diagonal), dadurch stimmen Kurven und Ecken von selbst.
-// Höhe z(d) = H·(1 − d/w)², Normale aus dem Gradienten, Licht von links oben.
-// H ist optisch überhöht und wächst mit dem Randanstieg, damit man die Mulde sieht.
+// Kuhle plastisch schattieren.
+// 1) Höhenfeld auf einem feinen Raster (N Punkte je Feld) aus demselben Abstandsfeld wie
+//    die Physik: z = (1 − d/w)² für d < w, im Abgrund 1 (Oberkante).
+// 2) Das Feld wird leicht weichgezeichnet (zweimal Box-Blur ≈ Gauß) – sonst bildet das
+//    Minimum der Abstände in Innenecken eine harte Gehrungslinie.
+// 3) Je Pixel Gradient bilinear aus dem Raster, Beleuchtung: Lambert + etwas Glanz
+//    (Blinn-Phong), Licht von links oben. Höhe optisch überhöht, wächst mit dem Randanstieg.
 function shadeGutter(g, s, isVoid) {
   const deg = settings.rimDeg, w = settings.rimW;
   if (mode !== 'edge' || deg <= 0) return;
-  const H = w * (0.25 + deg / 25 * 1.1);
+  const N = 24, R = level.rows, C = level.cols, GW = C * N + 1, GH = R * N + 1;
+  let z = new Float32Array(GW * GH);
+  for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) {
+    const fx = i / N, fy = j / N, cx = Math.min(C - 1, Math.floor(fx)), cy = Math.min(R - 1, Math.floor(fy));
+    if (isVoid(cx, cy)) { z[j * GW + i] = 1; continue; }
+    let d = w;
+    for (let y = cy - 1; y <= cy + 1; y++) for (let x = cx - 1; x <= cx + 1; x++) {
+      if (!isVoid(x, y)) continue;
+      const qx = Math.max(x, Math.min(fx, x + 1)), qy = Math.max(y, Math.min(fy, y + 1));
+      d = Math.min(d, Math.hypot(fx - qx, fy - qy));
+    }
+    const u = Math.max(0, 1 - d / w);
+    z[j * GW + i] = u * u;
+  }
+  // weichzeichnen, Radius ≈ 0,08 Felder, zwei Durchgänge
+  const rad = Math.max(1, Math.round(N * 0.08)), tmp = new Float32Array(z.length);
+  for (let pass = 0; pass < 2; pass++) {
+    for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) {
+      let a = 0, n = 0;
+      for (let k = -rad; k <= rad; k++) { const ii = i + k; if (ii >= 0 && ii < GW) { a += z[j * GW + ii]; n++; } }
+      tmp[j * GW + i] = a / n;
+    }
+    for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) {
+      let a = 0, n = 0;
+      for (let k = -rad; k <= rad; k++) { const jj = j + k; if (jj >= 0 && jj < GH) { a += tmp[jj * GW + i]; n++; } }
+      z[j * GW + i] = a / n;
+    }
+  }
+  const H = w * (0.3 + deg / 25 * 1.2);            // optische Höhe in Feldern
   const L = [-0.5, -0.62, 0.6], ln = Math.hypot(...L);
   const lx = L[0] / ln, ly = L[1] / ln, lz = L[2] / ln;
+  const hn = Math.hypot(lx, ly, lz + 1), hx = lx / hn, hy = ly / hn, hz = (lz + 1) / hn;   // Halbvektor
   const img = g.getImageData(0, 0, g.canvas.width, g.canvas.height), px = img.data, Wd = img.width;
-  const R = level.rows, C = level.cols;
+  const Z = (i, j) => z[Math.max(0, Math.min(GH - 1, j)) * GW + Math.max(0, Math.min(GW - 1, i))];
+  // Gradient an den Rasterpunkten (zentrale Differenzen), danach bilinear interpoliert –
+  // so ist er stetig und es entstehen keine Stufen
+  const DX = new Float32Array(GW * GH), DY = new Float32Array(GW * GH);
+  for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) {
+    DX[j * GW + i] = (Z(i + 1, j) - Z(i - 1, j)) / 2;
+    DY[j * GW + i] = (Z(i, j + 1) - Z(i, j - 1)) / 2;
+  }
+  const at = (A, i, j) => A[Math.max(0, Math.min(GH - 1, j)) * GW + Math.max(0, Math.min(GW - 1, i))];
   for (let cy = 0; cy < R; cy++) for (let cx = 0; cx < C; cx++) {
-    if (level.wall[cy][cx]) continue;
-    // nur Felder mit Abgrund in der Nachbarschaft brauchen Schattierung
-    const near = [];
-    for (let y = cy - 1; y <= cy + 1; y++) for (let x = cx - 1; x <= cx + 1; x++)
-      if (isVoid(x, y)) near.push(x, y);
-    if (!near.length) continue;
+    if (isVoid(cx, cy)) continue;
+    let near = false;
+    for (let y = cy - 1; y <= cy + 1; y++) for (let x = cx - 1; x <= cx + 1; x++) near = near || isVoid(x, y);
+    if (!near) continue;
     const x0 = Math.floor(cx * s), x1 = Math.floor((cx + 1) * s), y0 = Math.floor(cy * s), y1 = Math.floor((cy + 1) * s);
     for (let yy = y0; yy < y1; yy++) for (let xx = x0; xx < x1; xx++) {
-      const fx = (xx + .5) / s, fy = (yy + .5) / s;
-      let d = w, nx = 0, ny = 0;
-      for (let i = 0; i < near.length; i += 2) {
-        const vx = near[i], vy = near[i + 1];
-        const qx = Math.max(vx, Math.min(fx, vx + 1)), qy = Math.max(vy, Math.min(fy, vy + 1));
-        const dx = fx - qx, dy = fy - qy, dd = Math.hypot(dx, dy);
-        if (dd < d && dd > 1e-6) { d = dd; nx = dx / dd; ny = dy / dd; }
-      }
-      if (d >= w) continue;
-      const u = 1 - d / w;
-      const slope = -H * 2 * u / w;              // dz/dd (< 0: fällt zur Mitte hin ab)
-      const gx = slope * nx, gy = slope * ny;    // ∇z
+      const gxF = (xx + .5) / s * N, gyF = (yy + .5) / s * N;
+      const i = Math.floor(gxF), j = Math.floor(gyF), a = gxF - i, b = gyF - j;
+      if (Z(i, j) + Z(i + 1, j) + Z(i, j + 1) + Z(i + 1, j + 1) === 0) continue;
+      const bl = A => (at(A, i, j) * (1 - a) + at(A, i + 1, j) * a) * (1 - b)
+                    + (at(A, i, j + 1) * (1 - a) + at(A, i + 1, j + 1) * a) * b;
+      // in Felder umrechnen (× N) und optisch überhöhen
+      const gx = bl(DX) * N * H, gy = bl(DY) * N * H;
       const inv = 1 / Math.hypot(gx, gy, 1);
-      const I = (-gx * lx - gy * ly + lz) * inv;  // Lambert
-      // Abdunklung begrenzen: Schattenseite darf nicht wie Abgrund aussehen
-      const f = Math.max(0.72, Math.min(1.45, 1 + (I - lz) / lz * 0.75 + u * u * 0.08));
+      const nx = -gx * inv, ny = -gy * inv, nz = inv;
+      const I = nx * lx + ny * ly + nz * lz;
+      const spec = Math.pow(Math.max(0, nx * hx + ny * hy + nz * hz), 40) * 0.22 * Math.min(1, Math.hypot(gx, gy) * 2);
+      const f = Math.max(0.62, Math.min(1.5, 1 + (I - lz) / lz * 1.1));
       const o = (yy * Wd + xx) * 4;
-      px[o] = Math.min(255, px[o] * f); px[o + 1] = Math.min(255, px[o + 1] * f); px[o + 2] = Math.min(255, px[o + 2] * f);
+      px[o]     = Math.min(255, px[o] * f + spec * 255);
+      px[o + 1] = Math.min(255, px[o + 1] * f + spec * 240);
+      px[o + 2] = Math.min(255, px[o + 2] * f + spec * 210);
     }
   }
   g.putImageData(img, 0, 0);
@@ -646,12 +682,23 @@ function shadeGutter(g, s, isVoid) {
 function drawVoid(g, s) {
   const W = level.wall, R = level.rows, C = level.cols;
   const isVoid = (x, y) => y < 0 || x < 0 || y >= R || x >= C || W[y][x];
-  for (let y = 0; y < R; y++) for (let x = 0; x < C; x++) {
-    if (!W[y][x]) continue;
-    const vg = g.createLinearGradient(0, y * s, 0, (y + 1) * s);
-    vg.addColorStop(0, '#0b0603'); vg.addColorStop(1, '#140b05');
-    g.fillStyle = vg; g.fillRect(x * s, y * s, s + 1, s + 1);
-  }
+  // Abgrund: eine durchgehende Fläche (keine Streifen je Zelle), zum Rand hin dunkler
+  g.save();
+  g.beginPath();
+  for (let y = 0; y < R; y++) for (let x = 0; x < C; x++) if (W[y][x]) g.rect(x * s, y * s, s, s);
+  g.clip();
+  const cw = g.canvas.width, ch = g.canvas.height;
+  const vg = g.createRadialGradient(cw / 2, ch / 2, Math.min(cw, ch) * .1, cw / 2, ch / 2, Math.max(cw, ch) * .7);
+  vg.addColorStop(0, '#2a190c'); vg.addColorStop(1, '#0b0604');
+  g.fillStyle = vg; g.fillRect(0, 0, cw, ch);
+  // Schlagschatten der Stege in den Abgrund: Rechtecke weit links außerhalb zeichnen,
+  // nur ihr Schatten wird zurückversetzt – so entsteht kein Holz im Abgrund
+  const off = cw + 50;
+  g.shadowColor = 'rgba(0,0,0,.85)'; g.shadowBlur = s * .35;
+  g.shadowOffsetX = off + s * .12; g.shadowOffsetY = s * .22;
+  g.fillStyle = '#000';
+  for (let y = 0; y < R; y++) for (let x = 0; x < C; x++) if (!W[y][x]) g.fillRect(x * s - off, y * s, s + 1, s + 1);
+  g.restore();
   shadeGutter(g, s, isVoid);
   const k = Math.max(2, s * .07);
   for (let y = 0; y < R; y++) for (let x = 0; x < C; x++) {
