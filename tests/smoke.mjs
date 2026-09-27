@@ -10,7 +10,7 @@ const b = await chromium.launch();
 const p = await b.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
 const errs = []; p.on('pageerror', e => errs.push(e.message));
 await p.goto(url);
-await p.screenshot({ path: process.env.SHOT_DIR ? process.env.SHOT_DIR + '/menu.png' : '/dev/null' });
+if (process.env.SHOT_DIR) await p.screenshot({ path: process.env.SHOT_DIR + '/menu.png' });
 await p.click('.lvl >> nth=0');
 await p.click('#startBtn');
 const tiltTo = (beta, gamma) => p.evaluate(([b, g]) =>
@@ -48,9 +48,15 @@ await tiltTo(10, 0); await p.waitForTimeout(1200);
 q = await pos();
 const winVisible = await p.isVisible('#ovWin');
 check('Ziel erreicht, Gewinn-Dialog', q.finished && winVisible, q);
+const g = await p.evaluate(() => { const g = JSON.parse(localStorage.getItem('laby.ghost.classic:0'));
+  return g && { time: g.time, n: g.p.length / 3, first: g.p.slice(0, 3), elapsed }; });
+check('Geist gespeichert (30 Bilder/s, Start bei 1,5/1,5)',
+  g && Math.abs(g.time - g.elapsed) < 1e-9 && Math.abs(g.n - g.time * 30) < 3 && g.first[0] === 150 && g.first[1] === 150, g);
+await p.click('#retryBtn'); await p.click('#startBtn'); await tiltTo(0, 0); await p.waitForTimeout(400);
+const gp = await p.evaluate(() => ({ loaded: !!ghost, at: ghostAt(0.1), end: ghostAt(ghost.time + 1) }));
+check('Geist wird abgespielt und verschwindet am Ende', gp.loaded && gp.at && Math.abs(gp.at.x - 1.5) < .5 && gp.end === null, gp);
 if (process.env.SHOT_DIR) {
-  await p.click('#retryBtn'); await p.click('#startBtn'); await tiltTo(0, 0); await p.waitForTimeout(300);
-  await tiltTo(8, 10); await p.waitForTimeout(700);
+  await tiltTo(4, 3); await p.waitForTimeout(1500);
   await p.screenshot({ path: process.env.SHOT_DIR + '/game.png' });
 }
 // Nullpunkt: Start rechnet absolut waagerecht, "⊙ Null" übernimmt die aktuelle Haltung
